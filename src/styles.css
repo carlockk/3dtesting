@@ -36,6 +36,16 @@ body {
   min-height: 100vh;
 }
 
+.scene-shell.is-detail-open .canvas-wrap::before {
+  background:
+    radial-gradient(circle at center, rgba(4, 7, 12, 0.26) 0 32%, rgba(4, 7, 12, 0.54) 72%, rgba(4, 7, 12, 0.82) 100%);
+}
+
+.scene-shell.is-detail-open .canvas-wrap::after {
+  background:
+    linear-gradient(90deg, rgba(4, 7, 12, 0.72), rgba(4, 7, 12, 0.34) 26%, rgba(4, 7, 12, 0.18) 62%, rgba(4, 7, 12, 0.4));
+}
+
 .active-label {
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   text-transform: uppercase;
@@ -93,6 +103,34 @@ body {
   backdrop-filter: blur(16px);
 }
 
+.detail-controls {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 3;
+  padding: 0;
+  pointer-events: none;
+}
+
+.detail-back {
+  pointer-events: auto;
+}
+
+.detail-back {
+  position: absolute;
+  top: 1.4rem;
+  left: 1.4rem;
+  padding: 0.72rem 1rem;
+  border: 1px solid rgba(125, 211, 252, 0.22);
+  border-radius: 999px;
+  background: rgba(5, 9, 15, 0.72);
+  color: #f5f7fb;
+  font: inherit;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  backdrop-filter: blur(16px);
+}
+
 .footer-thumb {
   width: 68px;
   height: 68px;
@@ -127,89 +165,72 @@ body {
   text-overflow: ellipsis;
 }
 
-.card-panel-anchor {
+.card-inline-anchor {
   pointer-events: auto;
 }
 
-.card-detail-panel {
-  width: 170px;
-  padding: 0.6rem 0.65rem 0.65rem;
-  border-radius: 16px;
-  background: linear-gradient(180deg, rgba(7, 12, 19, 0.9), rgba(7, 12, 19, 0.76));
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.32);
-  backdrop-filter: blur(12px);
-  opacity: 0;
-  transform: translateX(-28px);
-  transition:
-    opacity 180ms ease,
-    transform 240ms ease;
-  pointer-events: none;
-}
-
-.card-detail-panel.is-open {
-  opacity: 1;
-  transform: translateX(0);
-  pointer-events: auto;
-}
-
-.card-detail-accent {
-  width: 30px;
-  height: 3px;
-  border-radius: 999px;
-  margin-bottom: 0.45rem;
-}
-
-.card-detail-label {
-  display: block;
-  margin-bottom: 0.18rem;
-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-size: 0.56rem;
-  color: #7dd3fc;
-}
-
-.card-detail-panel strong,
-.card-detail-scroll p {
-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-}
-
-.card-detail-panel strong {
-  display: block;
-  margin-bottom: 0.45rem;
-  font-size: 0.82rem;
-}
-
-.card-detail-scroll {
-  max-height: 118px;
+.card-inline-scroll {
+  width: 246px;
+  max-height: 92px;
   overflow-y: auto;
-  padding-right: 0.3rem;
+  padding-right: 0.18rem;
   scrollbar-width: thin;
   scrollbar-color: rgba(125, 211, 252, 0.45) transparent;
 }
 
-.card-detail-scroll::-webkit-scrollbar {
+.card-inline-scroll::-webkit-scrollbar {
   width: 4px;
 }
 
-.card-detail-scroll::-webkit-scrollbar-thumb {
+.card-inline-scroll::-webkit-scrollbar-thumb {
   background: rgba(125, 211, 252, 0.45);
   border-radius: 999px;
 }
 
-.card-detail-scroll p {
+.card-inline-scroll p {
   margin: 0;
-  font-size: 0.7rem;
-  line-height: 1.5;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   color: #ced8e4;
+  font-size: 0.66rem;
+  line-height: 1.42;
 }
 
 .scroll-track {
   height: 320vh;
 }
 
+@keyframes detail-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(32px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 @media (max-width: 960px) {
+  :root {
+    --footer-height: 108px;
+  }
+
+  .page-shell {
+    min-height: 360vh;
+  }
+
+  .detail-back {
+    top: 1rem;
+    left: 1rem;
+    padding: 0.64rem 0.9rem;
+  }
+
+  .canvas-wrap::before {
+    background:
+      radial-gradient(circle at center, transparent 0 28%, rgba(4, 7, 12, 0.28) 66%, rgba(4, 7, 12, 0.74) 100%);
+  }
+
   .active-footer {
     align-items: flex-start;
     min-height: 108px;
@@ -227,5 +248,41 @@ body {
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
+  }
+
+  .card-inline-scroll {
+    width: 198px;
+    max-height: 84px;
+    padding-right: 0.16rem;
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --footer-height: 116px;
+  }
+
+  .page-shell {
+    min-height: 340vh;
+  }
+
+  .active-footer {
+    gap: 0.8rem;
+    padding: 0.72rem 0.8rem calc(0.8rem + env(safe-area-inset-bottom));
+  }
+
+  .footer-thumb {
+    width: 52px;
+    height: 52px;
+    border-radius: 12px;
+  }
+
+  .footer-copy strong {
+    font-size: 0.94rem;
+  }
+
+  .card-inline-scroll {
+    width: 184px;
+    max-height: 76px;
   }
 }
