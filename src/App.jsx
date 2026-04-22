@@ -150,27 +150,95 @@ const CARD_LAYOUT = {
   mediaHeight: 0.72,
 };
 
-function useScrollProgress() {
-  const [scrollProgress, setScrollProgress] = useState(0);
+const GALAXY_SETTINGS = {
+  enabled: true,
+  showLegacyAxisSystem: false,
+  position: [-0.42, 0.12, -1.45],
+  rotation: [0.24, 0.1, -0.18],
+  scale: 1,
+  starCount: 6200,
+  starSize: 0.042,
+  radius: 4.8,
+  branches: 4,
+  spin: 1.2,
+  randomness: 0.42,
+  randomnessPower: 2.8,
+  verticalThickness: 0.34,
+  coreRadius: 0.88,
+  coreIntensity: 1.35,
+  nebulaCount: 18,
+  nebulaRadius: 5.6,
+  nebulaOpacity: 0.17,
+  scrollResponseSpeed: 1.12,
+  idleRotationSpeed: 0.028,
+  innerColor: "#f8fbff",
+  midColor: "#7dd3fc",
+  outerColor: "#7c3aed",
+  accentColor: "#22d3ee",
+  warmCoreColor: "#ffd39e",
+};
+
+function useScrollMetrics() {
+  const [metrics, setMetrics] = useState({ progress: 0, velocity: 0 });
 
   useEffect(() => {
+    let rafId = 0;
+    let decayRafId = 0;
+    const state = {
+      lastY: window.scrollY,
+      lastTime: performance.now(),
+      velocity: 0,
+    };
+
     const updateProgress = () => {
       const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
       const nextProgress = maxScroll <= 0 ? 0 : window.scrollY / maxScroll;
-      setScrollProgress(THREE.MathUtils.clamp(nextProgress, 0, 1));
+      const now = performance.now();
+      const deltaY = window.scrollY - state.lastY;
+      const deltaTime = Math.max((now - state.lastTime) / 1000, 1 / 240);
+      const rawVelocity = deltaY / deltaTime;
+
+      state.velocity = THREE.MathUtils.clamp(rawVelocity / 1600, -1, 1);
+      state.lastY = window.scrollY;
+      state.lastTime = now;
+
+      setMetrics({
+        progress: THREE.MathUtils.clamp(nextProgress, 0, 1),
+        velocity: state.velocity,
+      });
+    };
+
+    const decayVelocity = () => {
+      state.velocity = THREE.MathUtils.damp(state.velocity, 0, 4.5, 1 / 60);
+      setMetrics((current) => {
+        if (Math.abs(current.velocity - state.velocity) < 0.0005) {
+          return current;
+        }
+
+        return { ...current, velocity: state.velocity };
+      });
+      decayRafId = window.requestAnimationFrame(decayVelocity);
+    };
+
+    const handleScroll = () => {
+      window.cancelAnimationFrame(rafId);
+      rafId = window.requestAnimationFrame(updateProgress);
     };
 
     updateProgress();
-    window.addEventListener("scroll", updateProgress, { passive: true });
+    decayVelocity();
+    window.addEventListener("scroll", handleScroll, { passive: true });
     window.addEventListener("resize", updateProgress);
 
     return () => {
-      window.removeEventListener("scroll", updateProgress);
+      window.cancelAnimationFrame(rafId);
+      window.cancelAnimationFrame(decayRafId);
+      window.removeEventListener("scroll", handleScroll);
       window.removeEventListener("resize", updateProgress);
     };
   }, []);
 
-  return scrollProgress;
+  return metrics;
 }
 
 function useVisibleCardIndex(scrollProgress, itemCount, damping = 7) {
@@ -449,160 +517,120 @@ function AxisGuide({ scrollProgress }) {
   );
 }
 
-function buildGalaxyLayer({
+function buildSpiralGalaxy({
   count,
-  height,
-  radiusMin,
-  radiusMax,
-  depthScale,
-  colorRange,
-  brightnessRange,
-  centerBias = 1,
+  radius,
+  branches,
+  spin,
+  randomness,
+  randomnessPower,
+  verticalThickness,
+  coreRadius,
+  innerColor,
+  midColor,
+  outerColor,
+  accentColor,
 }) {
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
+  const depthFactors = new Float32Array(count);
   const color = new THREE.Color();
+  const inner = new THREE.Color(innerColor);
+  const mid = new THREE.Color(midColor);
+  const outer = new THREE.Color(outerColor);
+  const accent = new THREE.Color(accentColor);
 
   for (let index = 0; index < count; index += 1) {
     const stride = index * 3;
-    const progress = index / count;
-    const arm = index % 2 === 0 ? 1 : -1;
-    const radiusT = Math.pow(Math.random(), centerBias);
-    const radius = THREE.MathUtils.lerp(radiusMin, radiusMax, radiusT);
-    const angle = progress * Math.PI * 9.5 * arm + radius * 0.55;
-    const spread = 0.18 + (1 - radiusT) * 0.5 + Math.random() * 0.25;
-    const y = (Math.random() - 0.5) * height * (0.22 + radiusT * 0.78);
+    const radiusRatio = Math.pow(Math.random(), 1.55);
+    const particleRadius = radiusRatio * radius;
+    const branchAngle = ((index % branches) / branches) * Math.PI * 2;
+    const spinAngle = particleRadius * spin;
+    const randomScale = Math.pow(Math.random(), randomnessPower) * randomness * radiusRatio;
+    const randomX = (Math.random() < 0.5 ? -1 : 1) * randomScale * radius;
+    const randomY = (Math.random() - 0.5) * verticalThickness * radius * (0.3 + radiusRatio * 1.2);
+    const randomZ = (Math.random() < 0.5 ? -1 : 1) * randomScale * radius;
+    const angle = branchAngle + spinAngle;
+    const layerDepth = THREE.MathUtils.clamp((Math.random() - 0.5) * 2.35 + randomZ / Math.max(radius * 0.8, 0.001), -1, 1);
 
-    positions[stride] = Math.cos(angle) * radius + (Math.random() - 0.5) * spread;
-    positions[stride + 1] = y;
-    positions[stride + 2] =
-      Math.sin(angle) * radius * depthScale + (Math.random() - 0.5) * spread;
+    positions[stride] = Math.cos(angle) * particleRadius + randomX;
+    positions[stride + 1] = randomY;
+    positions[stride + 2] = Math.sin(angle) * particleRadius + randomZ + layerDepth * 1.45;
 
-    const hue = THREE.MathUtils.lerp(colorRange[0], colorRange[1], Math.random());
-    const lightness = THREE.MathUtils.lerp(brightnessRange[0], brightnessRange[1], Math.random());
-    color.setHSL(hue, 0.55 + Math.random() * 0.2, lightness);
+    const coreMix = 1 - THREE.MathUtils.smoothstep(particleRadius, 0, coreRadius);
+    const midMix = THREE.MathUtils.smoothstep(particleRadius, coreRadius * 0.7, radius * 0.58);
+    color.copy(inner).lerp(mid, midMix).lerp(outer, radiusRatio * 0.9);
+
+    if (Math.random() > 0.78) {
+      color.lerp(accent, 0.25 + Math.random() * 0.35);
+    }
+
+    color.offsetHSL(0, 0, coreMix * 0.12 + Math.random() * 0.04);
+    colors[stride] = color.r;
+    colors[stride + 1] = color.g;
+    colors[stride + 2] = color.b;
+    depthFactors[index] = layerDepth;
+  }
+
+  return { positions, colors, depthFactors };
+}
+
+function splitGalaxyLayers({ positions, colors, depthFactors }) {
+  const buckets = {
+    near: { positions: [], colors: [] },
+    mid: { positions: [], colors: [] },
+    far: { positions: [], colors: [] },
+  };
+
+  for (let index = 0; index < depthFactors.length; index += 1) {
+    const stride = index * 3;
+    const depth = depthFactors[index];
+    const bucket = depth > 0.2 ? buckets.near : depth < -0.2 ? buckets.far : buckets.mid;
+
+    bucket.positions.push(positions[stride], positions[stride + 1], positions[stride + 2]);
+    bucket.colors.push(colors[stride], colors[stride + 1], colors[stride + 2]);
+  }
+
+  return {
+    near: {
+      positions: new Float32Array(buckets.near.positions),
+      colors: new Float32Array(buckets.near.colors),
+    },
+    mid: {
+      positions: new Float32Array(buckets.mid.positions),
+      colors: new Float32Array(buckets.mid.colors),
+    },
+    far: {
+      positions: new Float32Array(buckets.far.positions),
+      colors: new Float32Array(buckets.far.colors),
+    },
+  };
+}
+
+function buildCoreCloud({ count, radius, colorA, colorB }) {
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const color = new THREE.Color();
+  const warm = new THREE.Color(colorA);
+  const bright = new THREE.Color(colorB);
+
+  for (let index = 0; index < count; index += 1) {
+    const stride = index * 3;
+    const distance = Math.pow(Math.random(), 2.2) * radius;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+
+    positions[stride] = Math.sin(phi) * Math.cos(theta) * distance;
+    positions[stride + 1] = (Math.random() - 0.5) * radius * 0.42;
+    positions[stride + 2] = Math.cos(phi) * distance;
+
+    color.copy(warm).lerp(bright, Math.random() * 0.7);
     colors[stride] = color.r;
     colors[stride + 1] = color.g;
     colors[stride + 2] = color.b;
   }
 
   return { positions, colors };
-}
-
-function GalaxyStars({ scrollProgress, height = 34 }) {
-  const starsRef = useRef(null);
-  const starTexture = useMemo(() => createStarTexture(), []);
-  const layers = useMemo(
-    () => [
-      {
-        ...buildGalaxyLayer({
-          count: 36,
-          height,
-          radiusMin: 1.2,
-          radiusMax: 3.8,
-          depthScale: 1.04,
-          colorRange: [0.08, 0.15],
-          brightnessRange: [0.9, 0.99],
-          centerBias: 2.1,
-        }),
-        size: 0.155,
-        opacity: 0.95,
-      },
-      {
-        ...buildGalaxyLayer({
-          count: 110,
-          height,
-          radiusMin: 1.8,
-          radiusMax: 5.8,
-          depthScale: 0.92,
-          colorRange: [0.09, 0.18],
-          brightnessRange: [0.72, 0.92],
-          centerBias: 1.55,
-        }),
-        size: 0.1,
-        opacity: 0.72,
-      },
-      {
-        ...buildGalaxyLayer({
-          count: 220,
-          height,
-          radiusMin: 2.2,
-          radiusMax: 7.4,
-          depthScale: 0.78,
-          colorRange: [0.54, 0.62],
-          brightnessRange: [0.58, 0.8],
-          centerBias: 1.2,
-        }),
-        size: 0.056,
-        opacity: 0.46,
-      },
-      {
-        ...buildGalaxyLayer({
-          count: 394,
-          height,
-          radiusMin: 3.6,
-          radiusMax: 10.8,
-          depthScale: 0.6,
-          colorRange: [0.56, 0.66],
-          brightnessRange: [0.34, 0.56],
-          centerBias: 0.92,
-        }),
-        size: 0.028,
-        opacity: 0.22,
-      },
-    ],
-    [height],
-  );
-
-  useFrame((state, delta) => {
-    if (!starsRef.current) {
-      return;
-    }
-
-    const targetRotation = scrollProgress * HELIX_SETTINGS.travelTurns * 0.38;
-    starsRef.current.rotation.y = THREE.MathUtils.damp(
-      starsRef.current.rotation.y,
-      targetRotation,
-      4.2,
-      delta,
-    );
-    starsRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 0.18) * 0.05;
-    starsRef.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.09) * 0.04;
-  });
-
-  return (
-    <group ref={starsRef} position={[0, 0, -0.8]}>
-      {layers.map((layer, index) => (
-        <points key={index}>
-          <bufferGeometry>
-            <bufferAttribute
-              attach="attributes-position"
-              count={layer.positions.length / 3}
-              array={layer.positions}
-              itemSize={3}
-            />
-            <bufferAttribute
-              attach="attributes-color"
-              count={layer.colors.length / 3}
-              array={layer.colors}
-              itemSize={3}
-            />
-          </bufferGeometry>
-          <pointsMaterial
-            size={layer.size}
-            sizeAttenuation
-            transparent
-            opacity={layer.opacity}
-            vertexColors
-            map={starTexture ?? undefined}
-            alphaMap={starTexture ?? undefined}
-            depthWrite={false}
-            blending={THREE.AdditiveBlending}
-          />
-        </points>
-      ))}
-    </group>
-  );
 }
 
 function createStarTexture() {
@@ -673,60 +701,275 @@ function createNebulaTexture() {
   return texture;
 }
 
-function SpiralNebula({ scrollProgress }) {
+function buildNebulaClouds({ count, radius }) {
+  return Array.from({ length: count }, (_, index) => {
+    const angle = (index / count) * Math.PI * 2 + Math.random() * 0.55;
+    const distance = THREE.MathUtils.lerp(radius * 0.24, radius, Math.random());
+    const scale = THREE.MathUtils.lerp(1.8, 4.8, Math.random());
+    const height = (Math.random() - 0.5) * radius * 0.22;
+
+    return {
+      position: [
+        Math.cos(angle) * distance,
+        height,
+        Math.sin(angle) * distance * 0.72,
+      ],
+      rotation: [Math.PI / 2, Math.random() * Math.PI, Math.random() * Math.PI],
+      scale,
+      color:
+        index % 5 === 0 ? "#f4b37d" : index % 3 === 0 ? "#7c3aed" : index % 2 === 0 ? "#38bdf8" : "#dbeafe",
+      opacity: THREE.MathUtils.lerp(0.06, 0.18, Math.random()),
+    };
+  });
+}
+
+function SpiralGalaxy({ scrollProgress, scrollVelocity, isMobile, config = GALAXY_SETTINGS }) {
+  const galaxyRef = useRef(null);
+  const starsRef = useRef(null);
   const nebulaRef = useRef(null);
+  const coreRef = useRef(null);
+  const starTexture = useMemo(() => createStarTexture(), []);
   const nebulaTexture = useMemo(() => createNebulaTexture(), []);
+  const rotationVelocity = useRef(0);
+  const rotationOffset = useRef(0);
+  const resolvedConfig = useMemo(
+    () => ({
+      ...config,
+      starCount: Math.floor(config.starCount * (isMobile ? 0.55 : 1)),
+      nebulaCount: Math.floor(config.nebulaCount * (isMobile ? 0.75 : 1)),
+      starSize: config.starSize * (isMobile ? 0.84 : 1),
+      radius: config.radius * (isMobile ? 0.88 : 1),
+    }),
+    [
+      config,
+      isMobile,
+    ],
+  );
+  const starLayers = useMemo(() => {
+    const base = buildSpiralGalaxy({
+      count: resolvedConfig.starCount,
+      radius: resolvedConfig.radius,
+      branches: resolvedConfig.branches,
+      spin: resolvedConfig.spin,
+      randomness: resolvedConfig.randomness,
+      randomnessPower: resolvedConfig.randomnessPower,
+      verticalThickness: resolvedConfig.verticalThickness,
+      coreRadius: resolvedConfig.coreRadius,
+      innerColor: resolvedConfig.innerColor,
+      midColor: resolvedConfig.midColor,
+      outerColor: resolvedConfig.outerColor,
+      accentColor: resolvedConfig.accentColor,
+    });
+    const layered = splitGalaxyLayers(base);
+
+    return [
+      {
+        positions: layered.far.positions,
+        colors: layered.far.colors,
+        size: resolvedConfig.starSize * 0.5,
+        opacity: 0.16,
+        rotation: [0, -0.06, -0.015],
+      },
+      {
+        positions: layered.mid.positions,
+        colors: layered.mid.colors,
+        size: resolvedConfig.starSize * 0.94,
+        opacity: 0.5,
+        rotation: [0, 0.08, 0.018],
+      },
+      {
+        positions: layered.near.positions,
+        colors: layered.near.colors,
+        size: resolvedConfig.starSize * 1.92,
+        opacity: 1,
+        rotation: [0, 0.15, 0.04],
+      },
+    ];
+  }, [
+    resolvedConfig.accentColor,
+    resolvedConfig.branches,
+    resolvedConfig.coreRadius,
+    resolvedConfig.innerColor,
+    resolvedConfig.midColor,
+    resolvedConfig.outerColor,
+    resolvedConfig.radius,
+    resolvedConfig.randomness,
+    resolvedConfig.randomnessPower,
+    resolvedConfig.spin,
+    resolvedConfig.starCount,
+    resolvedConfig.starSize,
+    resolvedConfig.verticalThickness,
+  ]);
+  const coreCloud = useMemo(
+    () =>
+      buildCoreCloud({
+        count: isMobile ? 220 : 380,
+        radius: resolvedConfig.coreRadius,
+        colorA: resolvedConfig.warmCoreColor,
+        colorB: resolvedConfig.innerColor,
+      }),
+    [isMobile, resolvedConfig.coreRadius, resolvedConfig.innerColor, resolvedConfig.warmCoreColor],
+  );
+  const nebulaClouds = useMemo(
+    () => buildNebulaClouds({ count: resolvedConfig.nebulaCount, radius: resolvedConfig.nebulaRadius }),
+    [resolvedConfig.nebulaCount, resolvedConfig.nebulaRadius],
+  );
+
+  useEffect(() => {
+    return () => {
+      starTexture?.dispose();
+      nebulaTexture?.dispose();
+    };
+  }, [nebulaTexture, starTexture]);
 
   useFrame((state, delta) => {
-    if (!nebulaRef.current) {
+    if (!galaxyRef.current) {
       return;
     }
 
-    const targetRotation = scrollProgress * HELIX_SETTINGS.travelTurns * 0.32;
-    nebulaRef.current.rotation.y = THREE.MathUtils.damp(
-      nebulaRef.current.rotation.y,
-      targetRotation,
-      3.8,
-      delta,
-    );
-    nebulaRef.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.08) * 0.08;
+    const targetVelocity = scrollVelocity * resolvedConfig.scrollResponseSpeed;
+    rotationVelocity.current = THREE.MathUtils.damp(rotationVelocity.current, targetVelocity, 5.2, delta);
+    rotationOffset.current += (rotationVelocity.current + resolvedConfig.idleRotationSpeed) * delta;
+
+    galaxyRef.current.rotation.y = rotationOffset.current;
+    galaxyRef.current.rotation.x = resolvedConfig.rotation[0] + Math.sin(state.clock.elapsedTime * 0.12) * 0.035;
+    galaxyRef.current.rotation.z = resolvedConfig.rotation[2] + Math.cos(state.clock.elapsedTime * 0.08) * 0.018;
+
+    if (starsRef.current) {
+      starsRef.current.rotation.z = THREE.MathUtils.damp(
+        starsRef.current.rotation.z,
+        resolvedConfig.rotation[1] + scrollProgress * 0.08,
+        2.8,
+        delta,
+      );
+    }
+
+    if (nebulaRef.current) {
+      nebulaRef.current.rotation.y -= delta * 0.016;
+      nebulaRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 0.06) * 0.05;
+    }
+
+    if (coreRef.current) {
+      coreRef.current.scale.setScalar(
+        THREE.MathUtils.lerp(1, 1.04, (Math.sin(state.clock.elapsedTime * 1.2) + 1) * 0.5),
+      );
+    }
   });
 
   return (
-    <group ref={nebulaRef} position={[0, 0, -1.8]}>
-      <mesh rotation={[Math.PI / 2, 0.28, 0]} position={[0, 1.8, 0]}>
-        <planeGeometry args={[18, 8.6, 1, 1]} />
-        <meshBasicMaterial
-          color="#38bdf8"
-          transparent
-          opacity={0.08}
-          alphaMap={nebulaTexture ?? undefined}
-          depthWrite={false}
-          blending={THREE.AdditiveBlending}
-        />
-      </mesh>
-      <mesh rotation={[Math.PI / 2, -0.42, 0]} position={[0, -0.8, -0.3]}>
-        <planeGeometry args={[14.8, 6.8, 1, 1]} />
-        <meshBasicMaterial
-          color="#f97316"
-          transparent
-          opacity={0.07}
-          alphaMap={nebulaTexture ?? undefined}
-          depthWrite={false}
-          blending={THREE.AdditiveBlending}
-        />
-      </mesh>
-      <mesh rotation={[Math.PI / 2, 0.08, 0]} position={[0, 0.2, 0.2]}>
-        <planeGeometry args={[9.4, 4.8, 1, 1]} />
-        <meshBasicMaterial
-          color="#f8fafc"
-          transparent
-          opacity={0.1}
-          alphaMap={nebulaTexture ?? undefined}
-          depthWrite={false}
-          blending={THREE.AdditiveBlending}
-        />
-      </mesh>
+    <group ref={galaxyRef} position={resolvedConfig.position} scale={resolvedConfig.scale}>
+      <group ref={nebulaRef}>
+        {nebulaClouds.map((cloud, index) => (
+          <sprite
+            key={index}
+            position={cloud.position}
+            scale={[cloud.scale * 1.8, cloud.scale, 1]}
+            rotation={cloud.rotation[2]}
+          >
+            <spriteMaterial
+              map={nebulaTexture ?? undefined}
+              color={cloud.color}
+              transparent
+              opacity={cloud.opacity * resolvedConfig.nebulaOpacity}
+              blending={THREE.AdditiveBlending}
+              depthWrite={false}
+            />
+          </sprite>
+        ))}
+      </group>
+
+      <group ref={starsRef}>
+        {starLayers.map((layer, index) => (
+          <points key={index} rotation={layer.rotation}>
+            <bufferGeometry>
+              <bufferAttribute
+                attach="attributes-position"
+                count={layer.positions.length / 3}
+                array={layer.positions}
+                itemSize={3}
+              />
+              <bufferAttribute
+                attach="attributes-color"
+                count={layer.colors.length / 3}
+                array={layer.colors}
+                itemSize={3}
+              />
+            </bufferGeometry>
+            <pointsMaterial
+              size={layer.size}
+              sizeAttenuation
+              transparent
+              opacity={layer.opacity}
+              vertexColors
+              map={starTexture ?? undefined}
+              alphaMap={starTexture ?? undefined}
+              depthWrite={false}
+              blending={THREE.AdditiveBlending}
+            />
+          </points>
+        ))}
+      </group>
+
+      <group ref={coreRef}>
+        <points>
+          <bufferGeometry>
+            <bufferAttribute
+              attach="attributes-position"
+              count={coreCloud.positions.length / 3}
+              array={coreCloud.positions}
+              itemSize={3}
+            />
+            <bufferAttribute
+              attach="attributes-color"
+              count={coreCloud.colors.length / 3}
+              array={coreCloud.colors}
+              itemSize={3}
+            />
+          </bufferGeometry>
+          <pointsMaterial
+            size={resolvedConfig.starSize * 2.6}
+            sizeAttenuation
+            transparent
+            opacity={resolvedConfig.coreIntensity}
+            vertexColors
+            map={starTexture ?? undefined}
+            alphaMap={starTexture ?? undefined}
+            depthWrite={false}
+            blending={THREE.AdditiveBlending}
+          />
+        </points>
+
+        <sprite scale={[1.15, 1.15, 1]}>
+          <spriteMaterial
+            map={nebulaTexture ?? undefined}
+            color={resolvedConfig.warmCoreColor}
+            transparent
+            opacity={0.52 * resolvedConfig.coreIntensity}
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
+          />
+        </sprite>
+        <sprite scale={[1.55, 1.55, 1]}>
+          <spriteMaterial
+            map={nebulaTexture ?? undefined}
+            color="#ffffff"
+            transparent
+            opacity={0.3 * resolvedConfig.coreIntensity}
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
+          />
+        </sprite>
+        <sprite scale={[3.1, 3.1, 1]}>
+          <spriteMaterial
+            map={nebulaTexture ?? undefined}
+            color={resolvedConfig.accentColor}
+            transparent
+            opacity={0.05 * resolvedConfig.coreIntensity}
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
+          />
+        </sprite>
+      </group>
     </group>
   );
 }
@@ -788,7 +1031,9 @@ function HelixCard({ item, index, count, scrollProgress, onSelect, isSelected, d
     const centerPull = THREE.MathUtils.smoothstep(focusStrength, 0, 1);
     const depthScale = THREE.MathUtils.lerp(1, 0.58, depthFalloff);
 
-    const positionX = THREE.MathUtils.lerp(x, 0, centerPull * 0.9);
+    const basePositionX = THREE.MathUtils.lerp(x, 0, centerPull * 0.9);
+    const rightSideSpacingCompensation = basePositionX > 0 ? absOffset * 0.12 : 0;
+    const positionX = basePositionX + rightSideSpacingCompensation;
     const positionZ = z + centerPull * 0.9;
     const targetScale = depthScale + centerPull * 0.18;
     const orbitYaw = Math.atan2(positionX, positionZ);
@@ -965,23 +1210,37 @@ function HelixCard({ item, index, count, scrollProgress, onSelect, isSelected, d
   );
 }
 
-function Scene({ scrollProgress, itemCount, onSelect, selectedIndex, isMobile }) {
-  const helixHeight = itemCount * HELIX_SETTINGS.verticalGap + 3;
+function Scene({ scrollProgress, scrollVelocity, itemCount, onSelect, selectedIndex, isMobile }) {
+  const galaxyConfig = useMemo(
+    () => ({
+      ...GALAXY_SETTINGS,
+      scale: isMobile ? 0.92 : 1,
+      position: isMobile ? [-0.22, 0.06, -1.7] : GALAXY_SETTINGS.position,
+    }),
+    [isMobile],
+  );
 
   return (
     <>
       <color attach="background" args={["#04070c"]} />
-      <fog attach="fog" args={["#04070c", 10, 26]} />
+      <fog attach="fog" args={["#04070c", 9, 25]} />
 
-      <ambientLight intensity={1.2} />
-      <directionalLight position={[6, 7, 8]} intensity={1.7} color="#fff4d6" />
-      <pointLight position={[-4, 1, 6]} intensity={28} distance={28} color="#38bdf8" />
-      <pointLight position={[4, -2, -3]} intensity={22} distance={22} color="#f97316" />
+      <ambientLight intensity={1.05} />
+      <directionalLight position={[6, 7, 8]} intensity={1.35} color="#fff4d6" />
+      <pointLight position={[-4, 1, 6]} intensity={20} distance={26} color="#38bdf8" />
+      <pointLight position={[4, -2, -3]} intensity={15} distance={20} color="#f97316" />
+      <pointLight position={[0, 0.6, -2.4]} intensity={18} distance={18} color="#dbeafe" />
 
       <group position={[0, -0.05, 0]}>
-        <SpiralNebula scrollProgress={scrollProgress} />
-        <GalaxyStars scrollProgress={scrollProgress} height={helixHeight + 8} />
-        <AxisGuide scrollProgress={scrollProgress} />
+        {GALAXY_SETTINGS.enabled ? (
+          <SpiralGalaxy
+            scrollProgress={scrollProgress}
+            scrollVelocity={scrollVelocity}
+            isMobile={isMobile}
+            config={galaxyConfig}
+          />
+        ) : null}
+        {GALAXY_SETTINGS.showLegacyAxisSystem ? <AxisGuide scrollProgress={scrollProgress} /> : null}
         <HelixCards
           items={CARD_ITEMS}
           scrollProgress={scrollProgress}
@@ -995,7 +1254,7 @@ function Scene({ scrollProgress, itemCount, onSelect, selectedIndex, isMobile })
 }
 
 export default function App() {
-  const scrollProgress = useScrollProgress();
+  const { progress: scrollProgress, velocity: scrollVelocity } = useScrollMetrics();
   const currentIndex = useVisibleCardIndex(scrollProgress, CARD_ITEMS.length, 7);
   const isMobile = useIsMobile();
   const [selectedIndex, setSelectedIndex] = useState(null);
@@ -1045,6 +1304,7 @@ export default function App() {
             <Suspense fallback={null}>
               <Scene
                 scrollProgress={scrollProgress}
+                scrollVelocity={scrollVelocity}
                 itemCount={CARD_ITEMS.length}
                 onSelect={handleSelectCard}
                 selectedIndex={selectedIndex}
