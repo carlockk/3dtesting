@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Float, Html, RoundedBox, Text, useTexture } from "@react-three/drei";
+import { Float, Html, RoundedBox, Text, useProgress, useTexture } from "@react-three/drei";
 import * as THREE from "three";
 
 const CARD_ITEMS = [
@@ -1449,6 +1449,108 @@ function Scene({ scrollProgress, scrollVelocity, itemCount, onSelect, selectedIn
   );
 }
 
+function LoadingOverlay() {
+  const { active, progress, loaded, total, errors } = useProgress();
+  const [displayProgress, setDisplayProgress] = useState(0);
+  const [isVisible, setIsVisible] = useState(true);
+  const particleField = useMemo(
+    () =>
+      Array.from({ length: 26 }, (_, index) => {
+        const angle = index * 0.92;
+        const radius = 18 + (index % 6) * 11;
+        const x = 50 + Math.cos(angle) * radius;
+        const y = 50 + Math.sin(angle * 1.17) * (14 + (index % 5) * 9);
+        const size = 2 + (index % 4) * 1.4;
+        const delay = -(index * 0.35);
+        const duration = 4.8 + (index % 5) * 0.9;
+
+        return {
+          id: index,
+          style: {
+            left: `${x}%`,
+            top: `${y}%`,
+            width: `${size}px`,
+            height: `${size}px`,
+            animationDelay: `${delay}s`,
+            animationDuration: `${duration}s`,
+          },
+        };
+      }),
+    [],
+  );
+
+  useEffect(() => {
+    const nextTarget = active ? progress : 100;
+    let frameId = 0;
+
+    const animate = () => {
+      setDisplayProgress((current) => {
+        const nextValue = THREE.MathUtils.damp(current, nextTarget, 5, 1 / 60);
+
+        if (Math.abs(nextValue - nextTarget) < 0.15) {
+          return nextTarget;
+        }
+
+        frameId = window.requestAnimationFrame(animate);
+        return nextValue;
+      });
+    };
+
+    frameId = window.requestAnimationFrame(animate);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [active, progress]);
+
+  useEffect(() => {
+    if (active || progress < 100) {
+      setIsVisible(true);
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setIsVisible(false);
+    }, 380);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [active, progress]);
+
+  if (!isVisible) {
+    return null;
+  }
+
+  const safeProgress = Math.max(0, Math.min(100, Math.round(displayProgress)));
+  const assetCount = total > 0 ? `${Math.min(loaded, total)} / ${total}` : null;
+  const statusLabel = errors.length > 0 ? "Cargando con recursos pendientes" : active ? "Cargando escena" : "Inicializando";
+
+  return (
+    <div className={`loading-overlay ${active ? "is-active" : "is-complete"}`} aria-live="polite" aria-busy={active}>
+      <div className="loading-panel">
+        <div className="loading-cosmos" aria-hidden="true">
+          <div className="loading-nebula" />
+          <div className="loading-ring loading-ring-a" />
+          <div className="loading-ring loading-ring-b" />
+          <div className="loading-core" />
+          {particleField.map((particle) => (
+            <span key={particle.id} className="loading-particle" style={particle.style} />
+          ))}
+        </div>
+        <span className="loading-kicker">{statusLabel}</span>
+        <div className="loading-metric">
+          <strong>{safeProgress}%</strong>
+          {assetCount ? <span>{assetCount}</span> : null}
+        </div>
+        <div className="loading-bar" aria-hidden="true">
+          <span style={{ transform: `scaleX(${safeProgress / 100})` }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const { progress: scrollProgress, velocity: scrollVelocity } = useScrollMetrics();
   const currentIndex = useVisibleCardIndex(scrollProgress, CARD_ITEMS.length, 7);
@@ -1493,6 +1595,7 @@ export default function App() {
     <div className="page-shell">
       <section className={`scene-shell ${selectedIndex !== null ? "is-detail-open" : ""}`}>
         <div className="canvas-wrap">
+          <LoadingOverlay />
           <Canvas
             camera={isMobile ? { position: [5.95, 0.14, 8.4], fov: 31 } : { position: [5.35, 0.08, 7.15], fov: 25 }}
             dpr={[1, 2]}
