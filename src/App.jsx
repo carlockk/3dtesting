@@ -153,7 +153,7 @@ const CARD_LAYOUT = {
 const GALAXY_SETTINGS = {
   enabled: true,
   showLegacyAxisSystem: false,
-  position: [-0.42, 0.12, -1.45],
+  position: [-0.68, 0.12, -1.45],
   rotation: [0.24, 0.1, -0.18],
   scale: 1,
   starCount: 6200,
@@ -702,6 +702,53 @@ function createStarTexture() {
   return texture;
 }
 
+function createStarFlareTexture() {
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    return null;
+  }
+
+  const center = size * 0.5;
+  const halo = context.createRadialGradient(center, center, 0, center, center, center * 0.5);
+  halo.addColorStop(0, "rgba(255,255,255,0.95)");
+  halo.addColorStop(0.12, "rgba(255,255,255,0.75)");
+  halo.addColorStop(0.32, "rgba(255,255,255,0.18)");
+  halo.addColorStop(1, "rgba(255,255,255,0)");
+  context.fillStyle = halo;
+  context.fillRect(0, 0, size, size);
+
+  context.save();
+  context.translate(center, center);
+  context.globalCompositeOperation = "lighter";
+
+  const drawSpike = (rotation, width, height, alpha) => {
+    context.save();
+    context.rotate(rotation);
+    const spikeGradient = context.createLinearGradient(0, -height * 0.5, 0, height * 0.5);
+    spikeGradient.addColorStop(0, "rgba(255,255,255,0)");
+    spikeGradient.addColorStop(0.5, `rgba(255,255,255,${alpha})`);
+    spikeGradient.addColorStop(1, "rgba(255,255,255,0)");
+    context.fillStyle = spikeGradient;
+    context.fillRect(-width * 0.5, -height * 0.5, width, height);
+    context.restore();
+  };
+
+  drawSpike(0, size * 0.06, size * 0.84, 0.62);
+  drawSpike(Math.PI * 0.5, size * 0.06, size * 0.84, 0.62);
+  drawSpike(Math.PI * 0.25, size * 0.032, size * 0.5, 0.22);
+  drawSpike(-Math.PI * 0.25, size * 0.032, size * 0.5, 0.22);
+  context.restore();
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
 function createNebulaTexture() {
   const size = 512;
   const canvas = document.createElement("canvas");
@@ -758,12 +805,34 @@ function buildNebulaClouds({ count, radius }) {
   });
 }
 
+function buildFlareLayer(layer, ratio) {
+  const positions = [];
+  const colors = [];
+
+  for (let index = 0; index < layer.positions.length / 3; index += 1) {
+    const keepSeed = ((index * 37) % 100) / 100;
+    if (keepSeed > ratio) {
+      continue;
+    }
+
+    const stride = index * 3;
+    positions.push(layer.positions[stride], layer.positions[stride + 1], layer.positions[stride + 2]);
+    colors.push(layer.colors[stride], layer.colors[stride + 1], layer.colors[stride + 2]);
+  }
+
+  return {
+    positions: new Float32Array(positions),
+    colors: new Float32Array(colors),
+  };
+}
+
 function SpiralGalaxy({ scrollProgress, scrollVelocity, isMobile, config = GALAXY_SETTINGS }) {
   const galaxyRef = useRef(null);
   const starsRef = useRef(null);
   const nebulaRef = useRef(null);
   const coreRef = useRef(null);
   const starTexture = useMemo(() => createStarTexture(), []);
+  const flareTexture = useMemo(() => createStarFlareTexture(), []);
   const nebulaTexture = useMemo(() => createNebulaTexture(), []);
   const rotationVelocity = useRef(0);
   const rotationOffset = useRef(0);
@@ -861,6 +930,48 @@ function SpiralGalaxy({ scrollProgress, scrollVelocity, isMobile, config = GALAX
         opacity: 0.98,
         rotation: [0, 0.15, 0.04],
       },
+      {
+        ...buildFlareLayer(layered.far.yellow, 0.16),
+        size: resolvedConfig.starSize * 0.72,
+        opacity: 0.18,
+        rotation: [0, -0.06, -0.015],
+        texture: "flare",
+      },
+      {
+        ...buildFlareLayer(layered.mid.yellow, 0.2),
+        size: resolvedConfig.starSize * 1.3,
+        opacity: 0.36,
+        rotation: [0, 0.08, 0.018],
+        texture: "flare",
+      },
+      {
+        ...buildFlareLayer(layered.near.yellow, 0.24),
+        size: resolvedConfig.starSize * 2.45,
+        opacity: 0.52,
+        rotation: [0, 0.15, 0.04],
+        texture: "flare",
+      },
+      {
+        ...buildFlareLayer(layered.far.red, 0.12),
+        size: resolvedConfig.starSize * 0.92,
+        opacity: 0.18,
+        rotation: [0, -0.06, -0.015],
+        texture: "flare",
+      },
+      {
+        ...buildFlareLayer(layered.mid.red, 0.16),
+        size: resolvedConfig.starSize * 1.62,
+        opacity: 0.34,
+        rotation: [0, 0.08, 0.018],
+        texture: "flare",
+      },
+      {
+        ...buildFlareLayer(layered.near.red, 0.2),
+        size: resolvedConfig.starSize * 3.1,
+        opacity: 0.46,
+        rotation: [0, 0.15, 0.04],
+        texture: "flare",
+      },
     ];
   }, [
     resolvedConfig.accentColor,
@@ -902,9 +1013,10 @@ function SpiralGalaxy({ scrollProgress, scrollVelocity, isMobile, config = GALAX
   useEffect(() => {
     return () => {
       starTexture?.dispose();
+      flareTexture?.dispose();
       nebulaTexture?.dispose();
     };
-  }, [nebulaTexture, starTexture]);
+  }, [flareTexture, nebulaTexture, starTexture]);
 
   useFrame((state, delta) => {
     if (!galaxyRef.current) {
@@ -985,8 +1097,8 @@ function SpiralGalaxy({ scrollProgress, scrollVelocity, isMobile, config = GALAX
               transparent
               opacity={layer.opacity}
               vertexColors
-              map={starTexture ?? undefined}
-              alphaMap={starTexture ?? undefined}
+              map={(layer.texture === "flare" ? flareTexture : starTexture) ?? undefined}
+              alphaMap={(layer.texture === "flare" ? flareTexture : starTexture) ?? undefined}
               depthWrite={false}
               blending={THREE.AdditiveBlending}
             />
@@ -1116,7 +1228,7 @@ function HelixCard({ item, index, count, scrollProgress, onSelect, isSelected, d
     const depthScale = THREE.MathUtils.lerp(1, 0.58, depthFalloff);
 
     const basePositionX = THREE.MathUtils.lerp(x, 0, centerPull * 0.9);
-    const rightSideSpacingCompensation = basePositionX > 0 ? absOffset * 0.12 : 0;
+    const rightSideSpacingCompensation = basePositionX > 0 ? absOffset * 0.03 : 0;
     const positionX = basePositionX + rightSideSpacingCompensation;
     const positionZ = z + centerPull * 0.9;
     const targetScale = depthScale + centerPull * 0.18;
@@ -1299,7 +1411,7 @@ function Scene({ scrollProgress, scrollVelocity, itemCount, onSelect, selectedIn
     () => ({
       ...GALAXY_SETTINGS,
       scale: isMobile ? 0.92 : 1,
-      position: isMobile ? [-0.22, 0.06, -1.7] : GALAXY_SETTINGS.position,
+      position: isMobile ? [-0.42, 0.06, -1.7] : GALAXY_SETTINGS.position,
     }),
     [isMobile],
   );
