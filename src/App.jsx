@@ -166,6 +166,7 @@ const GALAXY_SETTINGS = {
   verticalThickness: 0.34,
   coreRadius: 0.88,
   coreIntensity: 1.35,
+  coreFlattening: 0.5,
   nebulaCount: 18,
   nebulaRadius: 5.6,
   nebulaOpacity: 0.17,
@@ -607,7 +608,7 @@ function splitGalaxyLayers({ positions, colors, depthFactors }) {
   };
 }
 
-function buildCoreCloud({ count, radius, colorA, colorB }) {
+function buildCoreCloud({ count, radius, colorA, colorB, flattening = 1 }) {
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
   const color = new THREE.Color();
@@ -621,7 +622,7 @@ function buildCoreCloud({ count, radius, colorA, colorB }) {
     const phi = Math.acos(2 * Math.random() - 1);
 
     positions[stride] = Math.sin(phi) * Math.cos(theta) * distance;
-    positions[stride + 1] = (Math.random() - 0.5) * radius * 0.42;
+    positions[stride + 1] = (Math.random() - 0.5) * radius * 0.42 * flattening;
     positions[stride + 2] = Math.cos(phi) * distance;
 
     color.copy(warm).lerp(bright, Math.random() * 0.7);
@@ -807,8 +808,15 @@ function SpiralGalaxy({ scrollProgress, scrollVelocity, isMobile, config = GALAX
         radius: resolvedConfig.coreRadius,
         colorA: resolvedConfig.warmCoreColor,
         colorB: resolvedConfig.innerColor,
+        flattening: resolvedConfig.coreFlattening,
       }),
-    [isMobile, resolvedConfig.coreRadius, resolvedConfig.innerColor, resolvedConfig.warmCoreColor],
+    [
+      isMobile,
+      resolvedConfig.coreFlattening,
+      resolvedConfig.coreRadius,
+      resolvedConfig.innerColor,
+      resolvedConfig.warmCoreColor,
+    ],
   );
   const nebulaClouds = useMemo(
     () => buildNebulaClouds({ count: resolvedConfig.nebulaCount, radius: resolvedConfig.nebulaRadius }),
