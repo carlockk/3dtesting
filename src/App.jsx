@@ -535,11 +535,14 @@ function buildSpiralGalaxy({
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
   const depthFactors = new Float32Array(count);
+  const starTypes = new Uint8Array(count);
   const color = new THREE.Color();
   const inner = new THREE.Color(innerColor);
   const mid = new THREE.Color(midColor);
   const outer = new THREE.Color(outerColor);
   const accent = new THREE.Color(accentColor);
+  const yellow = new THREE.Color("#ffd86b");
+  const red = new THREE.Color("#ff5a4f");
 
   for (let index = 0; index < count; index += 1) {
     const stride = index * 3;
@@ -566,6 +569,15 @@ function buildSpiralGalaxy({
       color.lerp(accent, 0.25 + Math.random() * 0.35);
     }
 
+    const typeRoll = Math.random();
+    if (typeRoll > 0.965) {
+      color.lerp(red, 0.62 + Math.random() * 0.18);
+      starTypes[index] = 2;
+    } else if (typeRoll > 0.89) {
+      color.lerp(yellow, 0.52 + Math.random() * 0.16);
+      starTypes[index] = 1;
+    }
+
     color.offsetHSL(0, 0, coreMix * 0.12 + Math.random() * 0.04);
     colors[stride] = color.r;
     colors[stride + 1] = color.g;
@@ -573,37 +585,59 @@ function buildSpiralGalaxy({
     depthFactors[index] = layerDepth;
   }
 
-  return { positions, colors, depthFactors };
+  return { positions, colors, depthFactors, starTypes };
 }
 
-function splitGalaxyLayers({ positions, colors, depthFactors }) {
+function splitGalaxyLayers({ positions, colors, depthFactors, starTypes }) {
   const buckets = {
-    near: { positions: [], colors: [] },
-    mid: { positions: [], colors: [] },
-    far: { positions: [], colors: [] },
+    near: {
+      normal: { positions: [], colors: [] },
+      yellow: { positions: [], colors: [] },
+      red: { positions: [], colors: [] },
+    },
+    mid: {
+      normal: { positions: [], colors: [] },
+      yellow: { positions: [], colors: [] },
+      red: { positions: [], colors: [] },
+    },
+    far: {
+      normal: { positions: [], colors: [] },
+      yellow: { positions: [], colors: [] },
+      red: { positions: [], colors: [] },
+    },
   };
 
   for (let index = 0; index < depthFactors.length; index += 1) {
     const stride = index * 3;
     const depth = depthFactors[index];
-    const bucket = depth > 0.2 ? buckets.near : depth < -0.2 ? buckets.far : buckets.mid;
+    const depthBucket = depth > 0.2 ? buckets.near : depth < -0.2 ? buckets.far : buckets.mid;
+    const typeBucket =
+      starTypes[index] === 2 ? depthBucket.red : starTypes[index] === 1 ? depthBucket.yellow : depthBucket.normal;
 
-    bucket.positions.push(positions[stride], positions[stride + 1], positions[stride + 2]);
-    bucket.colors.push(colors[stride], colors[stride + 1], colors[stride + 2]);
+    typeBucket.positions.push(positions[stride], positions[stride + 1], positions[stride + 2]);
+    typeBucket.colors.push(colors[stride], colors[stride + 1], colors[stride + 2]);
   }
+
+  const toLayer = (bucket) => ({
+    positions: new Float32Array(bucket.positions),
+    colors: new Float32Array(bucket.colors),
+  });
 
   return {
     near: {
-      positions: new Float32Array(buckets.near.positions),
-      colors: new Float32Array(buckets.near.colors),
+      normal: toLayer(buckets.near.normal),
+      yellow: toLayer(buckets.near.yellow),
+      red: toLayer(buckets.near.red),
     },
     mid: {
-      positions: new Float32Array(buckets.mid.positions),
-      colors: new Float32Array(buckets.mid.colors),
+      normal: toLayer(buckets.mid.normal),
+      yellow: toLayer(buckets.mid.yellow),
+      red: toLayer(buckets.mid.red),
     },
     far: {
-      positions: new Float32Array(buckets.far.positions),
-      colors: new Float32Array(buckets.far.colors),
+      normal: toLayer(buckets.far.normal),
+      yellow: toLayer(buckets.far.yellow),
+      red: toLayer(buckets.far.red),
     },
   };
 }
@@ -765,24 +799,66 @@ function SpiralGalaxy({ scrollProgress, scrollVelocity, isMobile, config = GALAX
 
     return [
       {
-        positions: layered.far.positions,
-        colors: layered.far.colors,
+        positions: layered.far.normal.positions,
+        colors: layered.far.normal.colors,
         size: resolvedConfig.starSize * 0.5,
         opacity: 0.16,
         rotation: [0, -0.06, -0.015],
       },
       {
-        positions: layered.mid.positions,
-        colors: layered.mid.colors,
+        positions: layered.mid.normal.positions,
+        colors: layered.mid.normal.colors,
         size: resolvedConfig.starSize * 0.94,
         opacity: 0.5,
         rotation: [0, 0.08, 0.018],
       },
       {
-        positions: layered.near.positions,
-        colors: layered.near.colors,
+        positions: layered.near.normal.positions,
+        colors: layered.near.normal.colors,
         size: resolvedConfig.starSize * 1.92,
         opacity: 1,
+        rotation: [0, 0.15, 0.04],
+      },
+      {
+        positions: layered.far.yellow.positions,
+        colors: layered.far.yellow.colors,
+        size: resolvedConfig.starSize * 0.72,
+        opacity: 0.22,
+        rotation: [0, -0.06, -0.015],
+      },
+      {
+        positions: layered.mid.yellow.positions,
+        colors: layered.mid.yellow.colors,
+        size: resolvedConfig.starSize * 1.3,
+        opacity: 0.68,
+        rotation: [0, 0.08, 0.018],
+      },
+      {
+        positions: layered.near.yellow.positions,
+        colors: layered.near.yellow.colors,
+        size: resolvedConfig.starSize * 2.45,
+        opacity: 1.08,
+        rotation: [0, 0.15, 0.04],
+      },
+      {
+        positions: layered.far.red.positions,
+        colors: layered.far.red.colors,
+        size: resolvedConfig.starSize * 0.92,
+        opacity: 0.18,
+        rotation: [0, -0.06, -0.015],
+      },
+      {
+        positions: layered.mid.red.positions,
+        colors: layered.mid.red.colors,
+        size: resolvedConfig.starSize * 1.62,
+        opacity: 0.58,
+        rotation: [0, 0.08, 0.018],
+      },
+      {
+        positions: layered.near.red.positions,
+        colors: layered.near.red.colors,
+        size: resolvedConfig.starSize * 3.1,
+        opacity: 0.98,
         rotation: [0, 0.15, 0.04],
       },
     ];
@@ -947,32 +1023,32 @@ function SpiralGalaxy({ scrollProgress, scrollVelocity, isMobile, config = GALAX
           />
         </points>
 
-        <sprite scale={[1.15, 1.15, 1]}>
+        <sprite scale={[1.45, 1.45, 1]}>
           <spriteMaterial
             map={nebulaTexture ?? undefined}
             color={resolvedConfig.warmCoreColor}
             transparent
-            opacity={0.52 * resolvedConfig.coreIntensity}
+            opacity={0.42 * resolvedConfig.coreIntensity}
             blending={THREE.AdditiveBlending}
             depthWrite={false}
           />
         </sprite>
-        <sprite scale={[1.55, 1.55, 1]}>
+        <sprite scale={[2.05, 2.05, 1]}>
           <spriteMaterial
             map={nebulaTexture ?? undefined}
             color="#ffffff"
             transparent
-            opacity={0.3 * resolvedConfig.coreIntensity}
+            opacity={0.22 * resolvedConfig.coreIntensity}
             blending={THREE.AdditiveBlending}
             depthWrite={false}
           />
         </sprite>
-        <sprite scale={[3.1, 3.1, 1]}>
+        <sprite scale={[3.9, 3.9, 1]}>
           <spriteMaterial
             map={nebulaTexture ?? undefined}
             color={resolvedConfig.accentColor}
             transparent
-            opacity={0.05 * resolvedConfig.coreIntensity}
+            opacity={0.07 * resolvedConfig.coreIntensity}
             blending={THREE.AdditiveBlending}
             depthWrite={false}
           />
