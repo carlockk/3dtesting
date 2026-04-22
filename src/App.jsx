@@ -166,7 +166,7 @@ const GALAXY_SETTINGS = {
   verticalThickness: 0.34,
   coreRadius: 0.88,
   coreIntensity: 1.35,
-  coreFlattening: 0.5,
+  coreFlattening: 0.46,
   nebulaCount: 18,
   nebulaRadius: 5.6,
   nebulaOpacity: 0.17,
@@ -1135,22 +1135,22 @@ function SpiralGalaxy({ scrollProgress, scrollVelocity, isMobile, config = GALAX
           />
         </points>
 
-        <sprite scale={[1.45, 1.45, 1]}>
+        <sprite scale={[1.24, 1.24, 1]}>
           <spriteMaterial
             map={nebulaTexture ?? undefined}
             color={resolvedConfig.warmCoreColor}
             transparent
-            opacity={0.42 * resolvedConfig.coreIntensity}
+            opacity={0.55 * resolvedConfig.coreIntensity}
             blending={THREE.AdditiveBlending}
             depthWrite={false}
           />
         </sprite>
-        <sprite scale={[2.05, 2.05, 1]}>
+        <sprite scale={[1.74, 1.74, 1]}>
           <spriteMaterial
             map={nebulaTexture ?? undefined}
             color="#ffffff"
             transparent
-            opacity={0.22 * resolvedConfig.coreIntensity}
+            opacity={0.28 * resolvedConfig.coreIntensity}
             blending={THREE.AdditiveBlending}
             depthWrite={false}
           />
