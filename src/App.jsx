@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
-import { Float, Html, RoundedBox, Text, useProgress, useTexture } from "@react-three/drei";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Float, RoundedBox, Text, useProgress, useTexture } from "@react-three/drei";
 import * as THREE from "three";
 
 const CARD_ITEMS = [
@@ -135,27 +135,28 @@ const CARD_ITEMS = [
 ];
 
 const HELIX_SETTINGS = {
-  radius: 2.12,
-  verticalGap: 0.82,
+  centerX: 0.32,
+  radius: 2.18,
+  verticalGap: 0.8,
   angleStep: Math.PI * 0.44,
   travelTurns: Math.PI * 2.6,
 };
 
 const CARD_LAYOUT = {
-  width: 1.92,
-  height: 1.1,
-  depth: 0.028,
-  radius: 0.055,
-  mediaWidth: 1.74,
-  mediaHeight: 0.72,
+  width: 1.62,
+  height: 0.94,
+  depth: 0.001,
+  radius: 0.046,
+  mediaWidth: 1.46,
+  mediaHeight: 0.59,
 };
 
 const GALAXY_SETTINGS = {
   enabled: true,
   showLegacyAxisSystem: false,
-  position: [-0.68, 0.12, -1.45],
+  position: [0.04, 0.12, -1.45],
   rotation: [0.24, 0.1, -0.18],
-  scale: 1,
+  scale: 0.94,
   starCount: 6200,
   starSize: 0.042,
   radius: 4.8,
@@ -179,63 +180,79 @@ const GALAXY_SETTINGS = {
   warmCoreColor: "#ffd39e",
 };
 
+const CAMERA_SETTINGS = {
+  desktop: {
+    position: [0.8, 0.06, 8.95],
+    fov: 25,
+    lookAt: [0.48, -0.05, 0],
+  },
+  mobile: {
+    position: [0.95, 0.12, 9.6],
+    fov: 31,
+    lookAt: [0.42, -0.04, 0],
+  },
+};
+
 function useScrollMetrics() {
   const [metrics, setMetrics] = useState({ progress: 0, velocity: 0 });
 
   useEffect(() => {
     let rafId = 0;
-    let decayRafId = 0;
+    let idleTimeoutId = 0;
     const state = {
       lastY: window.scrollY,
       lastTime: performance.now(),
-      velocity: 0,
     };
 
-    const updateProgress = () => {
+    const updateMetrics = () => {
       const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
       const nextProgress = maxScroll <= 0 ? 0 : window.scrollY / maxScroll;
       const now = performance.now();
       const deltaY = window.scrollY - state.lastY;
       const deltaTime = Math.max((now - state.lastTime) / 1000, 1 / 240);
-      const rawVelocity = deltaY / deltaTime;
+      const nextVelocity = THREE.MathUtils.clamp((deltaY / deltaTime) / 1600, -1, 1);
 
-      state.velocity = THREE.MathUtils.clamp(rawVelocity / 1600, -1, 1);
       state.lastY = window.scrollY;
       state.lastTime = now;
 
-      setMetrics({
-        progress: THREE.MathUtils.clamp(nextProgress, 0, 1),
-        velocity: state.velocity,
-      });
-    };
-
-    const decayVelocity = () => {
-      state.velocity = THREE.MathUtils.damp(state.velocity, 0, 4.5, 1 / 60);
       setMetrics((current) => {
-        if (Math.abs(current.velocity - state.velocity) < 0.0005) {
+        const clampedProgress = THREE.MathUtils.clamp(nextProgress, 0, 1);
+        const progressChanged = Math.abs(current.progress - clampedProgress) > 0.0005;
+        const velocityChanged = Math.abs(current.velocity - nextVelocity) > 0.0005;
+
+        if (!progressChanged && !velocityChanged) {
           return current;
         }
 
-        return { ...current, velocity: state.velocity };
+        return {
+          progress: clampedProgress,
+          velocity: nextVelocity,
+        };
       });
-      decayRafId = window.requestAnimationFrame(decayVelocity);
+    };
+
+    const scheduleMetricsUpdate = () => {
+      window.cancelAnimationFrame(rafId);
+      rafId = window.requestAnimationFrame(updateMetrics);
     };
 
     const handleScroll = () => {
-      window.cancelAnimationFrame(rafId);
-      rafId = window.requestAnimationFrame(updateProgress);
+      scheduleMetricsUpdate();
+      window.clearTimeout(idleTimeoutId);
+      idleTimeoutId = window.setTimeout(() => {
+        setMetrics((current) => (Math.abs(current.velocity) < 0.0005 ? current : { ...current, velocity: 0 }));
+      }, 120);
     };
 
-    updateProgress();
-    decayVelocity();
+    scheduleMetricsUpdate();
     window.addEventListener("scroll", handleScroll, { passive: true });
-    window.addEventListener("resize", updateProgress);
+    window.addEventListener("resize", scheduleMetricsUpdate);
 
     return () => {
       window.cancelAnimationFrame(rafId);
-      window.cancelAnimationFrame(decayRafId);
+      window.clearTimeout(idleTimeoutId);
       window.removeEventListener("scroll", handleScroll);
-      window.removeEventListener("resize", updateProgress);
+      window.removeEventListener("resize", scheduleMetricsUpdate);
     };
   }, []);
 
@@ -290,6 +307,22 @@ function useIsMobile(breakpoint = 768) {
   }, [breakpoint]);
 
   return isMobile;
+}
+
+function CenteredCamera({ isMobile }) {
+  const { camera } = useThree();
+  const target = useMemo(() => new THREE.Vector3(), []);
+
+  useEffect(() => {
+    const settings = isMobile ? CAMERA_SETTINGS.mobile : CAMERA_SETTINGS.desktop;
+    camera.position.set(...settings.position);
+    camera.fov = settings.fov;
+    target.set(...settings.lookAt);
+    camera.lookAt(target);
+    camera.updateProjectionMatrix();
+  }, [camera, isMobile, target]);
+
+  return null;
 }
 
 function AxisGuide({ scrollProgress }) {
@@ -1246,7 +1279,16 @@ function SpiralGalaxy({ scrollProgress, scrollVelocity, isMobile, revealTarget =
   );
 }
 
-function HelixCards({ items, scrollProgress, onSelect, selectedIndex, isMobile, revealTarget = 1 }) {
+function HelixCards({
+  items,
+  scrollProgress,
+  onSelect,
+  focusedIndex,
+  detailExpanded,
+  detailOpen,
+  isMobile,
+  revealTarget = 1,
+}) {
   return (
     <group>
       {items.map((item, index) => (
@@ -1257,8 +1299,9 @@ function HelixCards({ items, scrollProgress, onSelect, selectedIndex, isMobile, 
           count={items.length}
           scrollProgress={scrollProgress}
           onSelect={onSelect}
-          isSelected={selectedIndex === index}
-          detailOpen={selectedIndex !== null}
+          isFocused={focusedIndex === index}
+          detailExpanded={detailExpanded && focusedIndex === index}
+          detailOpen={detailOpen}
           isMobile={isMobile}
           revealTarget={revealTarget}
         />
@@ -1267,7 +1310,18 @@ function HelixCards({ items, scrollProgress, onSelect, selectedIndex, isMobile, 
   );
 }
 
-function HelixCard({ item, index, count, scrollProgress, onSelect, isSelected, detailOpen, isMobile, revealTarget }) {
+function HelixCard({
+  item,
+  index,
+  count,
+  scrollProgress,
+  onSelect,
+  isFocused,
+  detailExpanded,
+  detailOpen,
+  isMobile,
+  revealTarget,
+}) {
   const groupRef = useRef(null);
   const shellRef = useRef(null);
   const texture = useTexture(item.image);
@@ -1281,6 +1335,11 @@ function HelixCard({ item, index, count, scrollProgress, onSelect, isSelected, d
   const tempFinalPosition = useRef(new THREE.Vector3());
   const tempRevealPosition = useRef(new THREE.Vector3());
   const tempCameraSpace = useRef(new THREE.Vector3());
+  const tempOrbitPosition = useRef(new THREE.Vector3());
+  const orbitEuler = useRef(new THREE.Euler());
+  const orbitQuaternion = useRef(new THREE.Quaternion());
+  const detailQuaternion = useRef(new THREE.Quaternion());
+  const targetQuaternion = useRef(new THREE.Quaternion());
   const [isHovered, setIsHovered] = useState(false);
 
   useFrame((state, delta) => {
@@ -1299,32 +1358,29 @@ function HelixCard({ item, index, count, scrollProgress, onSelect, isSelected, d
     const offsetRatio = THREE.MathUtils.clamp(absOffset / 4.2, 0, 1);
     const depthFalloff = THREE.MathUtils.smootherstep(offsetRatio, 0, 1);
     const y = -localOffset * HELIX_SETTINGS.verticalGap;
-    const x =
-      Math.sin(angle) * HELIX_SETTINGS.radius * (1 - depthFalloff * 0.14) +
-      Math.sign(localOffset || 1) * absOffset * 0.08;
-    const z =
-      Math.cos(angle) * HELIX_SETTINGS.radius * 0.54 -
-      Math.min(absOffset, 4.5) * 0.16;
+    const orbitalRadius = HELIX_SETTINGS.radius * (1 - depthFalloff * 0.1);
+    const leftSpreadOffset = localOffset < 0 ? -absOffset * 0.17 * (1 - depthFalloff * 0.28) : 0;
+    const x = HELIX_SETTINGS.centerX + Math.sin(angle) * orbitalRadius + leftSpreadOffset;
+    const z = Math.cos(angle) * orbitalRadius * 0.56 - Math.min(absOffset, 4.5) * 0.14;
     const focusStrength = 1 - THREE.MathUtils.clamp(Math.abs(localOffset), 0, 1);
     const centerPull = THREE.MathUtils.smoothstep(focusStrength, 0, 1);
     const depthScale = THREE.MathUtils.lerp(1, 0.58, depthFalloff);
 
-    const basePositionX = THREE.MathUtils.lerp(x, 0, centerPull * 0.9);
-    const rightSideSpacingCompensation = basePositionX > 0 ? absOffset * 0.03 : 0;
-    const positionX = basePositionX + rightSideSpacingCompensation;
-    const positionZ = z + centerPull * 0.9;
-    const targetScale = depthScale + centerPull * 0.18;
-    const orbitYaw = Math.atan2(positionX, positionZ);
-    const visibilityScale = detailOpen ? (isSelected ? 1 : 0.68) : 1;
+    const focusLaneX = HELIX_SETTINGS.centerX + (isMobile ? 0.2 : 0.26);
+    const positionX = THREE.MathUtils.lerp(x, focusLaneX, centerPull);
+    const positionZ = z + centerPull * 0.76;
+    const targetScale = depthScale + centerPull * 0.11;
+    const orbitYaw = Math.atan2(positionX - HELIX_SETTINGS.centerX, positionZ);
+    const visibilityScale = detailOpen ? (isFocused ? 1 : 0.68) : 1;
     detailProgress.current = THREE.MathUtils.damp(
       detailProgress.current,
-      isSelected ? 1 : 0,
+      detailExpanded ? 1 : 0,
       5.2,
       delta,
     );
     const routeProgress = THREE.MathUtils.smootherstep(detailProgress.current, 0, 1);
 
-    const orbitPosition = new THREE.Vector3(positionX, y, positionZ);
+    const orbitPosition = tempOrbitPosition.current.set(positionX, y, positionZ);
     const cameraForward = tempForward.current.set(0, 0, -1).applyQuaternion(state.camera.quaternion);
     const orbitDistanceToCamera = orbitPosition.distanceTo(state.camera.position);
     const perspectiveCompensation = THREE.MathUtils.clamp(
@@ -1356,15 +1412,15 @@ function HelixCard({ item, index, count, scrollProgress, onSelect, isSelected, d
     const frontalProximity = 1 - THREE.MathUtils.clamp(Math.abs(cameraSpacePosition.x) / 2.4, 0, 1);
     const depthProximity = THREE.MathUtils.clamp((-cameraSpacePosition.z - 2.05) / 0.95, 0, 1);
     const centerFocus = frontalProximity * 0.72 + depthProximity * 0.28;
+    const faceCameraProgress = Math.max(routeProgress, centerPull * 0.78);
 
-    const orbitQuaternion = new THREE.Quaternion().setFromEuler(
-      new THREE.Euler(0, orbitYaw, Math.sin(angle * 1.12) * 0.03 * (1 - centerPull * 0.35)),
-    );
-    const detailQuaternion = state.camera.quaternion.clone();
-    const targetQuaternion = orbitQuaternion.slerp(detailQuaternion, routeProgress);
+    orbitEuler.current.set(0, orbitYaw, Math.sin(angle * 1.12) * 0.03 * (1 - centerPull * 0.35));
+    orbitQuaternion.current.setFromEuler(orbitEuler.current);
+    detailQuaternion.current.copy(state.camera.quaternion);
+    targetQuaternion.current.copy(orbitQuaternion.current).slerp(detailQuaternion.current, faceCameraProgress);
 
     groupRef.current.position.copy(targetPosition);
-    groupRef.current.quaternion.copy(targetQuaternion);
+    groupRef.current.quaternion.copy(targetQuaternion.current);
 
     if (shellRef.current) {
       shellRef.current.position.z = THREE.MathUtils.damp(
@@ -1384,8 +1440,8 @@ function HelixCard({ item, index, count, scrollProgress, onSelect, isSelected, d
           shellRef.current.scale.x,
           THREE.MathUtils.lerp(0.001, 1, reveal) *
             THREE.MathUtils.lerp(
-              (targetScale + (isHovered ? 0.04 : 0)) * visibilityScale * perspectiveCompensation,
-              (isMobile ? 0.82 : 0.94) + centerFocus * (isMobile ? 0.02 : 0.03),
+              (targetScale + (isHovered ? 0.035 : 0)) * visibilityScale * perspectiveCompensation,
+              (isMobile ? 0.76 : 0.86) + centerFocus * (isMobile ? 0.018 : 0.026),
               routeProgress,
             ),
           5.2,
@@ -1413,57 +1469,50 @@ function HelixCard({ item, index, count, scrollProgress, onSelect, isSelected, d
       <Float speed={1.4} rotationIntensity={0.08} floatIntensity={0.12}>
         <group ref={shellRef}>
           <RoundedBox
-            args={[CARD_LAYOUT.width, CARD_LAYOUT.height, CARD_LAYOUT.depth]}
-            radius={CARD_LAYOUT.radius}
-            smoothness={6}
+            args={[CARD_LAYOUT.width + 0.018, CARD_LAYOUT.height + 0.018, CARD_LAYOUT.depth]}
+            radius={CARD_LAYOUT.radius + 0.004}
+            smoothness={4}
+            position={[0, 0, 0]}
           >
-            <meshStandardMaterial
-              color="#09131d"
-              metalness={0.2}
-              roughness={0.24}
-            />
+            <meshBasicMaterial color={item.accent} transparent opacity={0.15} toneMapped={false} />
           </RoundedBox>
 
-          <mesh position={[0, isSelected ? 0.08 : 0.18, 0.05]}>
-            <planeGeometry args={[CARD_LAYOUT.mediaWidth, isSelected ? 0.56 : CARD_LAYOUT.mediaHeight]} />
-            <meshBasicMaterial map={texture} toneMapped={false} />
+          <mesh position={[0, isFocused ? 0.12 : 0.1, 0.05]}>
+            <planeGeometry args={[CARD_LAYOUT.mediaWidth, isFocused ? 0.56 : CARD_LAYOUT.mediaHeight]} />
+            <meshBasicMaterial
+              map={texture}
+              toneMapped={false}
+              side={THREE.DoubleSide}
+              transparent
+              opacity={0.8}
+            />
           </mesh>
 
-          <mesh position={[0, isSelected ? 0.08 : 0.18, 0.051]}>
-            <planeGeometry args={[CARD_LAYOUT.mediaWidth, isSelected ? 0.56 : CARD_LAYOUT.mediaHeight]} />
-            <meshBasicMaterial color="#dbeafe" transparent opacity={0.05} />
+          <mesh position={[0, isFocused ? 0.12 : 0.1, 0.051]}>
+            <planeGeometry args={[CARD_LAYOUT.mediaWidth, isFocused ? 0.56 : CARD_LAYOUT.mediaHeight]} />
+            <meshBasicMaterial color="#dbeafe" transparent opacity={isFocused ? 0.08 : 0.05} side={THREE.DoubleSide} />
           </mesh>
 
-          <mesh position={[0, isSelected ? -0.47 : -0.35, 0.051]}>
-            <planeGeometry args={[1.74, isSelected ? 0.5 : 0.34]} />
-            <meshBasicMaterial color="#09131d" transparent opacity={0.92} />
-          </mesh>
-
-          {isSelected ? (
-            <mesh position={[0, 0.48, 0.051]}>
-              <planeGeometry args={[1.74, 0.18]} />
-              <meshBasicMaterial color="#09131d" transparent opacity={0.96} />
-            </mesh>
+          {!isFocused ? (
+            <Text
+              position={[-0.69, -0.255, 0.06]}
+              anchorX="left"
+              anchorY="middle"
+              maxWidth={1.34}
+              fontSize={0.086}
+              color="#f8fafc"
+            >
+              {item.title}
+            </Text>
           ) : null}
 
-          <Text
-            position={isSelected ? [-0.76, 0.48, 0.06] : [-0.76, -0.27, 0.06]}
-            anchorX="left"
-            anchorY="middle"
-            maxWidth={1.48}
-            fontSize={isSelected ? 0.082 : 0.094}
-            color="#f8fafc"
-          >
-            {item.title}
-          </Text>
-
-          {!isSelected ? (
+          {!isFocused ? (
             <Text
-              position={[-0.76, -0.39, 0.06]}
+              position={[-0.69, -0.365, 0.06]}
               anchorX="left"
               anchorY="top"
-              maxWidth={1.48}
-              fontSize={0.045}
+              maxWidth={1.34}
+              fontSize={0.041}
               lineHeight={1.32}
               color="#b8c4d3"
             >
@@ -1471,21 +1520,8 @@ function HelixCard({ item, index, count, scrollProgress, onSelect, isSelected, d
             </Text>
           ) : null}
 
-          {isSelected ? (
-            <Html
-              transform
-              position={[0, -0.47, 0.062]}
-              distanceFactor={1.34}
-              wrapperClass="card-inline-anchor"
-            >
-              <div className="card-inline-scroll">
-                <p>{item.details}</p>
-              </div>
-            </Html>
-          ) : null}
-
-          {!isSelected ? (
-            <mesh position={[-0.62, -0.27, 0.06]}>
+          {!isFocused ? (
+            <mesh position={[-0.57, -0.255, 0.06]}>
               <planeGeometry args={[0.18, 0.014]} />
               <meshBasicMaterial color={item.accent} toneMapped={false} />
             </mesh>
@@ -1496,18 +1532,30 @@ function HelixCard({ item, index, count, scrollProgress, onSelect, isSelected, d
   );
 }
 
-function Scene({ scrollProgress, scrollVelocity, itemCount, onSelect, selectedIndex, isMobile, galaxyRevealTarget, cardsRevealTarget }) {
+function Scene({
+  scrollProgress,
+  scrollVelocity,
+  itemCount,
+  onSelect,
+  selectedIndex,
+  focusedIndex,
+  detailOpen,
+  isMobile,
+  galaxyRevealTarget,
+  cardsRevealTarget,
+}) {
   const galaxyConfig = useMemo(
     () => ({
       ...GALAXY_SETTINGS,
       scale: isMobile ? 0.92 : 1,
-      position: isMobile ? [-0.42, 0.06, -1.7] : GALAXY_SETTINGS.position,
+      position: isMobile ? [0.1, 0.06, -1.7] : GALAXY_SETTINGS.position,
     }),
     [isMobile],
   );
 
   return (
     <>
+      <CenteredCamera isMobile={isMobile} />
       <color attach="background" args={["#000000"]} />
       <fog attach="fog" args={["#000000", 9, 25]} />
 
@@ -1532,7 +1580,9 @@ function Scene({ scrollProgress, scrollVelocity, itemCount, onSelect, selectedIn
           items={CARD_ITEMS}
           scrollProgress={scrollProgress}
           onSelect={onSelect}
-          selectedIndex={selectedIndex}
+          focusedIndex={focusedIndex}
+          detailExpanded={selectedIndex !== null}
+          detailOpen={detailOpen}
           isMobile={isMobile}
           revealTarget={cardsRevealTarget}
         />
@@ -1629,10 +1679,17 @@ export default function App() {
   const { progress: scrollProgress, velocity: scrollVelocity } = useScrollMetrics();
   const isMobile = useIsMobile();
   const [selectedIndex, setSelectedIndex] = useState(null);
+  const [closingIndex, setClosingIndex] = useState(null);
+  const [isClosingDetail, setIsClosingDetail] = useState(false);
   const [loaderVisible, setLoaderVisible] = useState(true);
   const [introPhase, setIntroPhase] = useState("loading");
+  const [introUnlocked, setIntroUnlocked] = useState(false);
   const introStarted = useRef(false);
   const uiReady = introPhase === "ready";
+  const detailIndex = selectedIndex ?? closingIndex;
+  const activeItem = detailIndex !== null ? CARD_ITEMS[detailIndex] : null;
+  const canvasDpr = isMobile ? [1, 1.2] : [1, 1.5];
+  const cameraConfig = isMobile ? CAMERA_SETTINGS.mobile : CAMERA_SETTINGS.desktop;
 
   useEffect(() => {
     const previousScrollRestoration = window.history.scrollRestoration;
@@ -1645,7 +1702,23 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (introStarted.current || assetsActive || assetsProgress < 100) {
+    if (assetsProgress >= 100 || (!assetsActive && assetsProgress > 0)) {
+      setIntroUnlocked(true);
+    }
+  }, [assetsActive, assetsProgress]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setIntroUnlocked(true);
+    }, 3600);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (introStarted.current || !introUnlocked) {
       return undefined;
     }
 
@@ -1654,52 +1727,66 @@ export default function App() {
 
     const revealId = window.setTimeout(() => {
       setIntroPhase("revealing");
-    }, 520);
+    }, 620);
     const hideId = window.setTimeout(() => {
       setLoaderVisible(false);
-    }, 1120);
+    }, 1380);
     const readyId = window.setTimeout(() => {
       setIntroPhase("ready");
-    }, 1460);
+    }, 1680);
 
     return () => {
       window.clearTimeout(revealId);
       window.clearTimeout(hideId);
       window.clearTimeout(readyId);
     };
-  }, [assetsActive, assetsProgress]);
+  }, [introUnlocked]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
-    if (selectedIndex !== null && uiReady) {
+    if (detailIndex !== null && uiReady) {
       document.body.style.overflow = "hidden";
     }
 
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [selectedIndex, uiReady]);
+  }, [detailIndex, uiReady]);
 
   const handleSelectCard = (index) => {
-    if (!uiReady || selectedIndex === index) {
+    if (!uiReady || selectedIndex === index || isClosingDetail) {
       return;
     }
 
+    setClosingIndex(null);
+    setIsClosingDetail(false);
     setSelectedIndex(index);
   };
 
   const handleCloseDetail = () => {
+    if (selectedIndex === null) {
+      return;
+    }
+
+    const indexToClose = selectedIndex;
+    setIsClosingDetail(true);
+    setClosingIndex(indexToClose);
     setSelectedIndex(null);
+
+    window.setTimeout(() => {
+      setClosingIndex(null);
+      setIsClosingDetail(false);
+    }, 420);
   };
 
   return (
     <div className="page-shell">
-      <section className={`scene-shell ${selectedIndex !== null ? "is-detail-open" : ""}`}>
+      <section className={`scene-shell ${detailIndex !== null ? "is-detail-open" : ""}`}>
         {loaderVisible ? <LoadingOverlay phase={introPhase} progress={assetsProgress} /> : null}
         <div className="canvas-wrap">
           <Canvas
-            camera={isMobile ? { position: [5.95, 0.14, 8.4], fov: 31 } : { position: [5.35, 0.08, 7.15], fov: 25 }}
-            dpr={[1, 2]}
+            camera={{ position: cameraConfig.position, fov: cameraConfig.fov }}
+            dpr={canvasDpr}
           >
             <Suspense fallback={null}>
               <Scene
@@ -1708,6 +1795,8 @@ export default function App() {
                 itemCount={CARD_ITEMS.length}
                 onSelect={handleSelectCard}
                 selectedIndex={selectedIndex}
+                focusedIndex={detailIndex}
+                detailOpen={detailIndex !== null}
                 isMobile={isMobile}
                 galaxyRevealTarget={introPhase === "loading" ? 0 : introPhase === "breaking" ? 0.42 : 1}
                 cardsRevealTarget={introPhase === "ready" ? 1 : introPhase === "revealing" ? 0.18 : 0}
@@ -1716,11 +1805,27 @@ export default function App() {
           </Canvas>
         </div>
 
-        {uiReady && selectedIndex !== null ? (
-          <div className="detail-controls" aria-label={`Detalle de ${CARD_ITEMS[selectedIndex].title}`}>
-            <button type="button" className="detail-back" onClick={handleCloseDetail}>
-              Back
-            </button>
+        {uiReady && activeItem ? (
+          <div className={`detail-page ${isClosingDetail ? "is-closing" : ""}`} aria-label={`Detalle de ${activeItem.title}`}>
+            <div className="detail-controls">
+              <button type="button" className="detail-back" onClick={handleCloseDetail}>
+                Back
+              </button>
+            </div>
+
+            <div className="detail-page-inner">
+              <header className="detail-header">
+                <h1>{activeItem.title}</h1>
+              </header>
+
+              <div className="detail-media">
+                <img src={activeItem.image} alt={activeItem.title} />
+              </div>
+
+              <div className="detail-copy-block">
+                <p>{activeItem.details}</p>
+              </div>
+            </div>
           </div>
         ) : null}
       </section>
