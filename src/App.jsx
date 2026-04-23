@@ -826,11 +826,18 @@ function buildFlareLayer(layer, ratio) {
   };
 }
 
-function SpiralGalaxy({ scrollProgress, scrollVelocity, isMobile, config = GALAXY_SETTINGS }) {
+function SpiralGalaxy({ scrollProgress, scrollVelocity, isMobile, revealTarget = 1, config = GALAXY_SETTINGS }) {
   const galaxyRef = useRef(null);
   const starsRef = useRef(null);
   const nebulaRef = useRef(null);
   const coreRef = useRef(null);
+  const revealProgress = useRef(0);
+  const baseMaterials = useRef([]);
+  const tempStartPosition = useRef(new THREE.Vector3());
+  const tempEndPosition = useRef(new THREE.Vector3());
+  const tempStarsOffset = useRef(new THREE.Vector3());
+  const tempNebulaOffset = useRef(new THREE.Vector3());
+  const tempCoreOffset = useRef(new THREE.Vector3());
   const starTexture = useMemo(() => createStarTexture(), []);
   const flareTexture = useMemo(() => createStarFlareTexture(), []);
   const nebulaTexture = useMemo(() => createNebulaTexture(), []);
@@ -1018,18 +1025,59 @@ function SpiralGalaxy({ scrollProgress, scrollVelocity, isMobile, config = GALAX
     };
   }, [flareTexture, nebulaTexture, starTexture]);
 
+  useEffect(() => {
+    baseMaterials.current = [];
+
+    if (!galaxyRef.current) {
+      return undefined;
+    }
+
+    galaxyRef.current.traverse((object) => {
+      const material = object.material;
+
+      if (material && typeof material.opacity === "number") {
+        material.userData.baseOpacity = material.opacity;
+        baseMaterials.current.push(material);
+      }
+    });
+
+    return () => {
+      baseMaterials.current = [];
+    };
+  }, [coreCloud, nebulaClouds, starLayers]);
+
   useFrame((state, delta) => {
     if (!galaxyRef.current) {
       return;
     }
 
+    revealProgress.current = THREE.MathUtils.damp(revealProgress.current, revealTarget, 3.2, delta);
+    const reveal = THREE.MathUtils.smootherstep(revealProgress.current, 0, 1);
+    const revealOpacity = THREE.MathUtils.smootherstep(revealProgress.current, 0.08, 1);
+    const startPosition = tempStartPosition.current.set(
+      isMobile ? 0.18 : 0.26,
+      isMobile ? 0.34 : 0.42,
+      isMobile ? 1.4 : 1.15,
+    );
+    const endPosition = tempEndPosition.current.set(...resolvedConfig.position);
+
     const targetVelocity = scrollVelocity * resolvedConfig.scrollResponseSpeed;
     rotationVelocity.current = THREE.MathUtils.damp(rotationVelocity.current, targetVelocity, 5.2, delta);
     rotationOffset.current += (rotationVelocity.current + resolvedConfig.idleRotationSpeed) * delta;
 
+    galaxyRef.current.position.copy(startPosition.lerp(endPosition, reveal));
+    galaxyRef.current.scale.setScalar(
+      THREE.MathUtils.lerp(resolvedConfig.scale * 1.85, resolvedConfig.scale, reveal),
+    );
     galaxyRef.current.rotation.y = rotationOffset.current;
-    galaxyRef.current.rotation.x = resolvedConfig.rotation[0] + Math.sin(state.clock.elapsedTime * 0.12) * 0.035;
-    galaxyRef.current.rotation.z = resolvedConfig.rotation[2] + Math.cos(state.clock.elapsedTime * 0.08) * 0.018;
+    galaxyRef.current.rotation.x =
+      resolvedConfig.rotation[0] +
+      Math.sin(state.clock.elapsedTime * 0.12) * 0.035 +
+      (1 - reveal) * 0.22;
+    galaxyRef.current.rotation.z =
+      resolvedConfig.rotation[2] +
+      Math.cos(state.clock.elapsedTime * 0.08) * 0.018 +
+      (1 - reveal) * -0.16;
 
     if (starsRef.current) {
       starsRef.current.rotation.z = THREE.MathUtils.damp(
@@ -1038,18 +1086,46 @@ function SpiralGalaxy({ scrollProgress, scrollVelocity, isMobile, config = GALAX
         2.8,
         delta,
       );
+      starsRef.current.scale.setScalar(THREE.MathUtils.lerp(1.32, 1, reveal));
+      starsRef.current.position.copy(
+        tempStarsOffset.current.set(
+          THREE.MathUtils.lerp(isMobile ? -1.6 : -2.2, 0, reveal),
+          THREE.MathUtils.lerp(isMobile ? 0.24 : 0.3, 0, reveal),
+          THREE.MathUtils.lerp(0.55, 0, reveal),
+        ),
+      );
     }
 
     if (nebulaRef.current) {
       nebulaRef.current.rotation.y -= delta * 0.016;
       nebulaRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 0.06) * 0.05;
+      nebulaRef.current.scale.setScalar(THREE.MathUtils.lerp(1.42, 1, reveal));
+      nebulaRef.current.position.copy(
+        tempNebulaOffset.current.set(
+          THREE.MathUtils.lerp(isMobile ? 1.3 : 1.85, 0, reveal),
+          THREE.MathUtils.lerp(isMobile ? -0.18 : -0.24, 0, reveal),
+          THREE.MathUtils.lerp(0.45, 0, reveal),
+        ),
+      );
     }
 
     if (coreRef.current) {
+      coreRef.current.position.copy(
+        tempCoreOffset.current.set(
+          THREE.MathUtils.lerp(0, 0, reveal),
+          THREE.MathUtils.lerp(isMobile ? 0.16 : 0.2, 0, reveal),
+          THREE.MathUtils.lerp(0.35, 0, reveal),
+        ),
+      );
       coreRef.current.scale.setScalar(
-        THREE.MathUtils.lerp(1, 1.04, (Math.sin(state.clock.elapsedTime * 1.2) + 1) * 0.5),
+        THREE.MathUtils.lerp(1.2, 1.04, reveal) *
+          THREE.MathUtils.lerp(1, 1.04, (Math.sin(state.clock.elapsedTime * 1.2) + 1) * 0.5),
       );
     }
+
+    baseMaterials.current.forEach((material) => {
+      material.opacity = material.userData.baseOpacity * revealOpacity;
+    });
   });
 
   return (
@@ -1170,7 +1246,7 @@ function SpiralGalaxy({ scrollProgress, scrollVelocity, isMobile, config = GALAX
   );
 }
 
-function HelixCards({ items, scrollProgress, onSelect, selectedIndex, isMobile }) {
+function HelixCards({ items, scrollProgress, onSelect, selectedIndex, isMobile, revealTarget = 1 }) {
   return (
     <group>
       {items.map((item, index) => (
@@ -1184,22 +1260,26 @@ function HelixCards({ items, scrollProgress, onSelect, selectedIndex, isMobile }
           isSelected={selectedIndex === index}
           detailOpen={selectedIndex !== null}
           isMobile={isMobile}
+          revealTarget={revealTarget}
         />
       ))}
     </group>
   );
 }
 
-function HelixCard({ item, index, count, scrollProgress, onSelect, isSelected, detailOpen, isMobile }) {
+function HelixCard({ item, index, count, scrollProgress, onSelect, isSelected, detailOpen, isMobile, revealTarget }) {
   const groupRef = useRef(null);
   const shellRef = useRef(null);
   const texture = useTexture(item.image);
   const motion = useRef(scrollProgress);
   const detailProgress = useRef(0);
+  const introProgress = useRef(0);
   const tempForward = useRef(new THREE.Vector3());
   const tempMidPosition = useRef(new THREE.Vector3());
   const tempDetailPosition = useRef(new THREE.Vector3());
   const tempTargetPosition = useRef(new THREE.Vector3());
+  const tempFinalPosition = useRef(new THREE.Vector3());
+  const tempRevealPosition = useRef(new THREE.Vector3());
   const tempCameraSpace = useRef(new THREE.Vector3());
   const [isHovered, setIsHovered] = useState(false);
 
@@ -1209,6 +1289,8 @@ function HelixCard({ item, index, count, scrollProgress, onSelect, isSelected, d
     }
 
     motion.current = THREE.MathUtils.damp(motion.current, scrollProgress, 7, delta);
+    introProgress.current = THREE.MathUtils.damp(introProgress.current, revealTarget, 3.8, delta);
+    const reveal = THREE.MathUtils.smootherstep(introProgress.current, 0, 1);
 
     const focusIndex = motion.current * (count - 1);
     const localOffset = index - focusIndex;
@@ -1261,6 +1343,13 @@ function HelixCard({ item, index, count, scrollProgress, onSelect, isSelected, d
       .lerp(midPosition, Math.min(routeProgress / 0.62, 1))
       .lerp(detailPosition, THREE.MathUtils.smoothstep(routeProgress, 0.58, 1))
       .addScaledVector(cameraForward, Math.sin(routeProgress * Math.PI) * 0.05);
+    const finalPosition = tempFinalPosition.current.copy(targetPosition);
+    const revealPosition = tempRevealPosition.current
+      .set(positionX * 0.08, y * 0.1, isMobile ? 1.28 : 1.08)
+      .applyMatrix4(state.camera.matrixWorld)
+      .addScaledVector(cameraForward, 0.55 + (count - index) * 0.01);
+
+    targetPosition.copy(revealPosition).lerp(finalPosition, reveal);
 
     const cameraSpacePosition = tempCameraSpace.current.copy(targetPosition);
     state.camera.worldToLocal(cameraSpacePosition);
@@ -1293,11 +1382,12 @@ function HelixCard({ item, index, count, scrollProgress, onSelect, isSelected, d
       shellRef.current.scale.setScalar(
         THREE.MathUtils.damp(
           shellRef.current.scale.x,
-          THREE.MathUtils.lerp(
-            (targetScale + (isHovered ? 0.04 : 0)) * visibilityScale * perspectiveCompensation,
-            (isMobile ? 0.82 : 0.94) + centerFocus * (isMobile ? 0.02 : 0.03),
-            routeProgress,
-          ),
+          THREE.MathUtils.lerp(0.001, 1, reveal) *
+            THREE.MathUtils.lerp(
+              (targetScale + (isHovered ? 0.04 : 0)) * visibilityScale * perspectiveCompensation,
+              (isMobile ? 0.82 : 0.94) + centerFocus * (isMobile ? 0.02 : 0.03),
+              routeProgress,
+            ),
           5.2,
           delta,
         ),
@@ -1406,7 +1496,7 @@ function HelixCard({ item, index, count, scrollProgress, onSelect, isSelected, d
   );
 }
 
-function Scene({ scrollProgress, scrollVelocity, itemCount, onSelect, selectedIndex, isMobile }) {
+function Scene({ scrollProgress, scrollVelocity, itemCount, onSelect, selectedIndex, isMobile, galaxyRevealTarget, cardsRevealTarget }) {
   const galaxyConfig = useMemo(
     () => ({
       ...GALAXY_SETTINGS,
@@ -1418,8 +1508,8 @@ function Scene({ scrollProgress, scrollVelocity, itemCount, onSelect, selectedIn
 
   return (
     <>
-      <color attach="background" args={["#04070c"]} />
-      <fog attach="fog" args={["#04070c", 9, 25]} />
+      <color attach="background" args={["#000000"]} />
+      <fog attach="fog" args={["#000000", 9, 25]} />
 
       <ambientLight intensity={1.05} />
       <directionalLight position={[6, 7, 8]} intensity={1.35} color="#fff4d6" />
@@ -1433,6 +1523,7 @@ function Scene({ scrollProgress, scrollVelocity, itemCount, onSelect, selectedIn
             scrollProgress={scrollProgress}
             scrollVelocity={scrollVelocity}
             isMobile={isMobile}
+            revealTarget={galaxyRevealTarget}
             config={galaxyConfig}
           />
         ) : null}
@@ -1443,16 +1534,15 @@ function Scene({ scrollProgress, scrollVelocity, itemCount, onSelect, selectedIn
           onSelect={onSelect}
           selectedIndex={selectedIndex}
           isMobile={isMobile}
+          revealTarget={cardsRevealTarget}
         />
       </group>
     </>
   );
 }
 
-function LoadingOverlay() {
-  const { active, progress, loaded, total, errors } = useProgress();
+function LoadingOverlay({ phase, progress }) {
   const [displayProgress, setDisplayProgress] = useState(0);
-  const [isVisible, setIsVisible] = useState(true);
   const particleField = useMemo(
     () =>
       Array.from({ length: 26 }, (_, index) => {
@@ -1473,6 +1563,9 @@ function LoadingOverlay() {
             height: `${size}px`,
             animationDelay: `${delay}s`,
             animationDuration: `${duration}s`,
+            "--drift-x": `${Math.cos(angle) * (54 + (index % 3) * 18)}px`,
+            "--drift-y": `${Math.sin(angle * 1.37) * (24 + (index % 4) * 10)}px`,
+            "--particle-rotate": `${(index % 2 === 0 ? 1 : -1) * (18 + index * 2)}deg`,
           },
         };
       }),
@@ -1480,7 +1573,7 @@ function LoadingOverlay() {
   );
 
   useEffect(() => {
-    const nextTarget = active ? progress : 100;
+    const nextTarget = phase === "loading" ? progress : 100;
     let frameId = 0;
 
     const animate = () => {
@@ -1501,50 +1594,30 @@ function LoadingOverlay() {
     return () => {
       window.cancelAnimationFrame(frameId);
     };
-  }, [active, progress]);
-
-  useEffect(() => {
-    if (active || progress < 100) {
-      setIsVisible(true);
-      return undefined;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setIsVisible(false);
-    }, 380);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [active, progress]);
-
-  if (!isVisible) {
-    return null;
-  }
+  }, [phase, progress]);
 
   const safeProgress = Math.max(0, Math.min(100, Math.round(displayProgress)));
-  const assetCount = total > 0 ? `${Math.min(loaded, total)} / ${total}` : null;
-  const statusLabel = errors.length > 0 ? "Cargando con recursos pendientes" : active ? "Cargando escena" : "Inicializando";
 
   return (
-    <div className={`loading-overlay ${active ? "is-active" : "is-complete"}`} aria-live="polite" aria-busy={active}>
-      <div className="loading-panel">
-        <div className="loading-cosmos" aria-hidden="true">
-          <div className="loading-nebula" />
-          <div className="loading-ring loading-ring-a" />
-          <div className="loading-ring loading-ring-b" />
-          <div className="loading-core" />
-          {particleField.map((particle) => (
-            <span key={particle.id} className="loading-particle" style={particle.style} />
-          ))}
-        </div>
-        <span className="loading-kicker">{statusLabel}</span>
-        <div className="loading-metric">
+    <div
+      className={`loading-overlay is-${phase} ${phase === "revealing" ? "is-breaking" : ""}`}
+      aria-live="polite"
+      aria-busy={phase === "loading" || phase === "breaking" || phase === "revealing"}
+    >
+      <div className="loading-cosmos" aria-hidden="true">
+        <div className="loading-aura loading-aura-outer" />
+        <div className="loading-aura loading-aura-inner" />
+        <div className="loading-gas loading-gas-a" />
+        <div className="loading-gas loading-gas-b" />
+        <div className="loading-nebula" />
+        <div className="loading-ring loading-ring-a" />
+        <div className="loading-ring loading-ring-b" />
+        <div className="loading-core" />
+        {particleField.map((particle) => (
+          <span key={particle.id} className="loading-particle" style={particle.style} />
+        ))}
+        <div className="loading-progress">
           <strong>{safeProgress}%</strong>
-          {assetCount ? <span>{assetCount}</span> : null}
-        </div>
-        <div className="loading-bar" aria-hidden="true">
-          <span style={{ transform: `scaleX(${safeProgress / 100})` }} />
         </div>
       </div>
     </div>
@@ -1552,11 +1625,14 @@ function LoadingOverlay() {
 }
 
 export default function App() {
+  const { active: assetsActive, progress: assetsProgress } = useProgress();
   const { progress: scrollProgress, velocity: scrollVelocity } = useScrollMetrics();
-  const currentIndex = useVisibleCardIndex(scrollProgress, CARD_ITEMS.length, 7);
   const isMobile = useIsMobile();
   const [selectedIndex, setSelectedIndex] = useState(null);
-  const activeItem = CARD_ITEMS[selectedIndex ?? currentIndex];
+  const [loaderVisible, setLoaderVisible] = useState(true);
+  const [introPhase, setIntroPhase] = useState("loading");
+  const introStarted = useRef(false);
+  const uiReady = introPhase === "ready";
 
   useEffect(() => {
     const previousScrollRestoration = window.history.scrollRestoration;
@@ -1569,18 +1645,43 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (introStarted.current || assetsActive || assetsProgress < 100) {
+      return undefined;
+    }
+
+    introStarted.current = true;
+    setIntroPhase("breaking");
+
+    const revealId = window.setTimeout(() => {
+      setIntroPhase("revealing");
+    }, 520);
+    const hideId = window.setTimeout(() => {
+      setLoaderVisible(false);
+    }, 1120);
+    const readyId = window.setTimeout(() => {
+      setIntroPhase("ready");
+    }, 1460);
+
+    return () => {
+      window.clearTimeout(revealId);
+      window.clearTimeout(hideId);
+      window.clearTimeout(readyId);
+    };
+  }, [assetsActive, assetsProgress]);
+
+  useEffect(() => {
     const previousOverflow = document.body.style.overflow;
-    if (selectedIndex !== null) {
+    if (selectedIndex !== null && uiReady) {
       document.body.style.overflow = "hidden";
     }
 
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [selectedIndex]);
+  }, [selectedIndex, uiReady]);
 
   const handleSelectCard = (index) => {
-    if (selectedIndex === index) {
+    if (!uiReady || selectedIndex === index) {
       return;
     }
 
@@ -1594,8 +1695,8 @@ export default function App() {
   return (
     <div className="page-shell">
       <section className={`scene-shell ${selectedIndex !== null ? "is-detail-open" : ""}`}>
+        {loaderVisible ? <LoadingOverlay phase={introPhase} progress={assetsProgress} /> : null}
         <div className="canvas-wrap">
-          <LoadingOverlay />
           <Canvas
             camera={isMobile ? { position: [5.95, 0.14, 8.4], fov: 31 } : { position: [5.35, 0.08, 7.15], fov: 25 }}
             dpr={[1, 2]}
@@ -1608,27 +1709,20 @@ export default function App() {
                 onSelect={handleSelectCard}
                 selectedIndex={selectedIndex}
                 isMobile={isMobile}
+                galaxyRevealTarget={introPhase === "loading" ? 0 : introPhase === "breaking" ? 0.42 : 1}
+                cardsRevealTarget={introPhase === "ready" ? 1 : introPhase === "revealing" ? 0.18 : 0}
               />
             </Suspense>
           </Canvas>
         </div>
 
-        {selectedIndex !== null ? (
-          <div className="detail-controls" aria-label={`Detalle de ${activeItem.title}`}>
+        {uiReady && selectedIndex !== null ? (
+          <div className="detail-controls" aria-label={`Detalle de ${CARD_ITEMS[selectedIndex].title}`}>
             <button type="button" className="detail-back" onClick={handleCloseDetail}>
               Back
             </button>
           </div>
         ) : null}
-
-        <div className="active-footer">
-          <img src={activeItem.image} alt={activeItem.title} className="footer-thumb" />
-          <div className="footer-copy">
-            <span className="active-label">Tarjeta visible</span>
-            <strong>{activeItem.title}</strong>
-            <p>{activeItem.description}</p>
-          </div>
-        </div>
       </section>
 
       <div className="scroll-track" aria-hidden="true" />
